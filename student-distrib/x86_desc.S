@@ -8,9 +8,10 @@
 
 .globl ldt_size, tss_size
 .globl gdt_desc, ldt_desc, tss_desc
-.globl tss, tss_desc_ptr, ldt, ldt_desc_ptr
+.globl tss, tss_desc_ptr, ldt, ldt_desc_ptr, gdt_desc_ptr
 .globl gdt_ptr
 .globl idt_desc_ptr, idt
+.globl gdt_desc_ptr, gdt
 
 .align 4
 
@@ -85,6 +86,14 @@ ldt_desc_ptr:
 gdt_bottom:
 
     .align 16
+
+gdt_desc_ptr:
+    .word gdt_bottom - gdt - 1
+    .long gdt           # setup gdt
+    
+    .align  16
+    
+
 ldt:
     .rept 4
     .quad 0
@@ -99,6 +108,7 @@ idt_desc_ptr:
 
 
     .align  16
+
 idt:
 _idt:
     .rept NUM_VEC
@@ -106,3 +116,4 @@ _idt:
     .endr
 
 idt_bottom:
+

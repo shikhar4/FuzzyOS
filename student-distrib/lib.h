@@ -7,13 +7,40 @@
 
 #include "types.h"
 
+#define VIDEO       0xB8000
+#define NUM_COLS    80
+#define scroll_one_down 160
+#define NUM_ROWS    25
+#define scroll_limit 24
+// #define ATTRIB      0x9F
+#define lower_8_cursor_pos 0x0F
+#define upper_8_cursor_pos 0x0E
+#define cursor_mask 0xFF
+#define cursor_port 0x3D4
+#define cursor_data 0x3D5
+
+extern int ATTRIB;
+
 int32_t printf(int8_t *format, ...);
 void putc(uint8_t c);
+void terminal_putc(uint8_t c, int32_t video);
+void deletec();
+void reset_cursor();
+void update_cursor();
+void store_deleted_line();
+void scroll_down(int32_t flag, int32_t execute, char * vidmem);
 int32_t puts(int8_t *s);
+int32_t keyboard_puts(int8_t *s);
 int8_t *itoa(uint32_t value, int8_t* buf, int32_t radix);
 int8_t *strrev(int8_t* s);
 uint32_t strlen(const int8_t* s);
 void clear(void);
+void test_interrupts(void);
+
+
+extern int screen_x;
+extern int screen_y;
+extern int save_y;
 
 void* memset(void* s, int32_t c, uint32_t n);
 void* memset_word(void* s, int32_t c, uint32_t n);

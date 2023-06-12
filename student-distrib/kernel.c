@@ -7,6 +7,16 @@
 #include "lib.h"
 #include "i8259.h"
 #include "debug.h"
+#include "tests.h"
+#include "create_handler.h"
+#include "keyboard.h"
+#include "paging.h"
+#include "rtc.h"
+#include "filesys.h"
+#include "system_call.h"
+#include "scheduler.h"
+
+// #define RUN_TESTS
 
 /* Macros. */
 /* Check if the bit BIT in FLAGS is set. */
@@ -29,6 +39,11 @@ void entry(unsigned long magic, unsigned long addr) {
 
     /* Set MBI to the address of the Multiboot information structure. */
     mbi = (multiboot_info_t *) addr;
+    // printf("mbi: %x\n", mbi);
+    module_t* fsmod = (module_t*)mbi->mods_addr; // defined fsmod
+    // printf("fsmod: %x\n", fsmod);
+    // printf("fsmod->mod_start: %x\n", fsmod->mod_start);
+    uint32_t* filesysStart = (uint32_t*)fsmod->mod_start;
 
     /* Print out the flags. */
     printf("flags = 0x%#x\n", (unsigned)mbi->flags);
@@ -133,20 +148,41 @@ void entry(unsigned long magic, unsigned long addr) {
         ltr(KERNEL_TSS);
     }
 
-    /* Init the PIC */
-    i8259_init();
-
     /* Initialize devices, memory, filesystem, enable device interrupts on the
      * PIC, any other initialization stuff... */
+
+    // init the paging
+    init_paging();
+    /* Init the PIC */
+    i8259_init();
+    //init the keyboard
+    init_keyboard();
+    //init the RTC
+    init_rtc();
+    // init PIT
+    init_pit();
+
+    init_filesys(filesysStart);
+
+    clear();
+    reset_cursor();
+    update_cursor();
 
     /* Enable interrupts */
     /* Do not enable the following until after you have set up your
      * IDT correctly otherwise QEMU will triple fault and simple close
      * without showing you any output */
-    /*printf("Enabling Interrupts\n");
-    sti();*/
+    /*printf("Enabling Interrupts\n");*/
+    sti();
 
+#ifdef RUN_TESTS
+    /* Run tests */
+    launch_tests();
+#endif
     /* Execute the first program ("shell") ... */
+    // execute((uint8_t*)"shell");
+    // boot_terminals();
+    // scheduler();
 
     /* Spin (nicely, so we don't chew up cycles) */
     asm volatile (".1: hlt; jmp .1;");

@@ -2,15 +2,15 @@
  * vim:ts=4 noexpandtab */
 
 #include "lib.h"
+#include "rtc.h"
+#include "keyboard.h"
 
-#define VIDEO       0xB8000
-#define NUM_COLS    80
-#define NUM_ROWS    25
-#define ATTRIB      0x7
-
-static int screen_x;
-static int screen_y;
+// int screen_x;
+// int screen_y;
+// int save_y = NUM_COLS;
 static char* video_mem = (char *)VIDEO;
+
+int ATTRIB = 0x17;
 
 /* void clear(void);
  * Inputs: void
@@ -18,9 +18,10 @@ static char* video_mem = (char *)VIDEO;
  * Function: Clears video memory */
 void clear(void) {
     int32_t i;
+    video_mem = (char *) VIDEO;
     for (i = 0; i < NUM_ROWS * NUM_COLS; i++) {
         *(uint8_t *)(video_mem + (i << 1)) = ' ';
-        *(uint8_t *)(video_mem + (i << 1) + 1) = ATTRIB;
+        *(uint8_t *)(video_mem + (i << 1) + 1) = colors[getDisplayTerm()];
     }
 }
 
@@ -163,22 +164,221 @@ int32_t puts(int8_t* s) {
     return index;
 }
 
+int32_t keyboard_puts(int8_t* s) {
+    register int32_t index = 0;
+    while (s[index] != '\0') {
+        if (s[index == '\n'])
+            break;
+        putc(s[index]);
+        index++;
+    }
+    return index;
+}
+
 /* void putc(uint8_t c);
  * Inputs: uint_8* c = character to print
  * Return Value: void
  *  Function: Output a character to the console */
 void putc(uint8_t c) {
+    // char * temp_vidmem = (char*) VIDEO;
+    video_mem = (char *) VIDEO;
+    terminal_t* terminal = (terminal_t *)terminal_data[getDisplayTerm()];
     if(c == '\n' || c == '\r') {
-        screen_y++;
-        screen_x = 0;
+        // if enter is pressed, update screen_x to the start of the next line
+        (terminal->_screen_y)++;
+        terminal->_screen_x = 0;  
     } else {
-        *(uint8_t *)(video_mem + ((NUM_COLS * screen_y + screen_x) << 1)) = c;
-        *(uint8_t *)(video_mem + ((NUM_COLS * screen_y + screen_x) << 1) + 1) = ATTRIB;
-        screen_x++;
-        screen_x %= NUM_COLS;
-        screen_y = (screen_y + (screen_x / NUM_COLS)) % NUM_ROWS;
+        *(uint8_t *)(video_mem + ((NUM_COLS * terminal->_screen_y + terminal->_screen_x) << 1)) = c;
+        *(uint8_t *)(video_mem + ((NUM_COLS * terminal->_screen_y + terminal->_screen_x) << 1) + 1) = colors[getDisplayTerm()];
+        terminal->_screen_x++;
+         // if end of last line reached, update screen_x to the start of the line and increment screen_y by 1
+        if (terminal->_screen_x == NUM_COLS) {
+            terminal->_screen_x = 0;
+            (terminal->_screen_y)++;
+            if (terminal->_screen_y == NUM_ROWS) { // if end of terminal reached, scroll down by 1 line 
+                scroll_down(1, -1, video_mem);
+                // terminal->_save_y--;
+            }
+            return; 
+        }
+        terminal->_screen_x %= NUM_COLS;
+        terminal->_screen_y = (terminal->_screen_y + (terminal->_screen_x / NUM_COLS)) % NUM_ROWS;
+        
+    }
+    if (terminal->_screen_y == NUM_ROWS) { // if end of terminal reached, scroll down by one line 
+        scroll_down(1, -1, video_mem);
+        // terminal->_save_y--;
     }
 }
+
+/* void terminal_putc(uint8_t c);
+ * Inputs: uint_8* c = character to print, cur execute termimnal
+ * Return Value: void
+ * Function: Output a character to the terminal memory */
+void terminal_putc(uint8_t c, int32_t video) {
+    char * temp_vidmem = (char*) VIDEO;
+    int32_t cur_execute = video;
+    if (video == getDisplayTerm())
+        video = 3; // 3 is just used as a flag
+    
+    int32_t flag = 0;           // write to current execute termainal memory, or physical VIDEO memory if execute=display
+    switch (video) {
+        
+        case 0:
+            temp_vidmem = (char *)terminal_vidmem[0];
+            break;
+        case 1:
+            temp_vidmem = (char *)terminal_vidmem[1];
+            break;
+        case 2:
+            temp_vidmem = (char *)terminal_vidmem[2];
+            break;
+        case 3:
+            temp_vidmem = (char *)VIDEO;
+            flag = 1;
+            break;
+        default: 
+            temp_vidmem = (char *)VIDEO;
+    }
+    terminal_t* terminal = (terminal_t *)terminal_data[cur_execute];
+    
+    if(c == '\n' || c == '\r') {
+        // if enter is pressed, update screen_x to the start of the next line
+        (terminal->_screen_y)++;
+        terminal->_screen_x = 0;  
+    } else {
+        *(uint8_t *)(temp_vidmem + ((NUM_COLS * terminal->_screen_y + terminal->_screen_x) << 1)) = c;
+        *(uint8_t *)(temp_vidmem + ((NUM_COLS * terminal->_screen_y + terminal->_screen_x) << 1) + 1) = colors[cur_execute];
+        (terminal->_screen_x)++;
+         // if end of last line reached, update screen_x to the start of the line and increment screen_y by 1
+        if (terminal->_screen_x == NUM_COLS) {
+            terminal->_screen_x = 0;
+            (terminal->_screen_y)++;
+            if (terminal->_screen_y == NUM_ROWS) // if end of terminal reached, scroll down by 1 line 
+                scroll_down(flag, cur_execute, temp_vidmem);
+            return; 
+        }
+        (terminal->_screen_x) %= NUM_COLS;
+        terminal->_screen_y = (terminal->_screen_y + (terminal->_screen_x / NUM_COLS)) % NUM_ROWS;
+        
+    }
+    if (terminal->_screen_y == NUM_ROWS) // if end of terminal reached, scroll down by one line 
+        scroll_down(flag, cur_execute, temp_vidmem);
+    // temp_vidmem = (char *)VIDEO;
+}
+
+/* void deletec()
+ * Inputs: None
+ * Return Value: void
+ *  Function: deletes the previous character */
+void deletec() {
+    // char * temp_vidmem = (char*) VIDEO;
+    video_mem = (char *) VIDEO;
+    terminal_t* terminal = (terminal_t *)terminal_data[getDisplayTerm()];
+    (terminal->_screen_x)--;
+    if (terminal->_screen_x < 0 && terminal->_screen_y > terminal->_save_y) {                // if at beginning of current line and want to delete more, then
+        terminal->_screen_x += NUM_COLS;                               // delete from end of previous line
+        (terminal->_screen_y)--;
+    }
+    else if (terminal->_screen_x < 0 && terminal->_screen_y <= terminal->_save_y)            // if at beginning of current line and want to delete more, but save_y
+        terminal->_screen_x = 0;                                       // prevents, then reset x to 0 (keep at left side of current line)
+    char clear = ' ';
+    *(uint8_t *)(video_mem + ((NUM_COLS * terminal->_screen_y + terminal->_screen_x) << 1)) = clear;  // replacing the currentl line with an empty string 
+    // *(uint8_t *)(video_mem + ((NUM_COLS * screen_y + screen_x-1) << 1) + 1) = ATTRIB;
+    
+}
+
+/* void reset_cursor()
+ * Inputs: None
+ * Return Value: void
+ *  Function: Resets the cursor to the top left of the screen */
+void reset_cursor() { 
+    terminal_t* terminal = (terminal_t *)terminal_data[getDisplayTerm()];
+    /// update cursor to the (0, 0) point on the terminal 
+    terminal->_screen_x = 0;
+    terminal->_screen_y = 0;
+    // *(uint8_t *)(video_mem + ((NUM_COLS * screen_y + screen_x) << 1)) = '_';
+}
+
+/* void update_cursor()
+ * Inputs: None
+ * Return Value: void
+ *  Function: updates the cursor depending on the current Screen_x and screen_y values */
+void update_cursor() {
+    terminal_t* terminal = (terminal_t *)terminal_data[getDisplayTerm()];
+    // the following code is picked up from OSDev 
+	uint16_t pos = (terminal->_screen_y ) * NUM_COLS + terminal->_screen_x; // find the current position of the cursor 
+	outb(lower_8_cursor_pos, cursor_port); // clearing current cursor position 
+	outb((uint8_t) (pos & cursor_mask), cursor_data); //splitting cursor coordinates
+	outb(upper_8_cursor_pos, cursor_port);
+	outb((uint8_t) ((pos >> 8) & cursor_mask), cursor_data); // splitting cursor coordinates by bitshifting by 8 bits
+}
+
+/* void store_deleted_line()
+ * Inputs: None
+ * Return Value: void
+ *  Function: stores the last line of the terminal (the line at the current screen_y value) */
+void store_deleted_line() {
+    terminal_t* terminal = (terminal_t *)terminal_data[getDisplayTerm()];
+    terminal->_save_y = terminal->_screen_y; // save the last line of the terminal 
+}
+
+/* void scroll_down()
+ * Inputs: None
+ * Return Value: void
+ *  Function: scrolls the screen one line up */
+void scroll_down (int32_t flag, int32_t execute, char * vidmem) {
+    terminal_t* terminal;
+    if (!flag){
+        terminal = (terminal_t *)terminal_data[execute];
+    }
+    else{
+        terminal = (terminal_t *) terminal_data[getDisplayTerm()];
+    }
+
+    int video = getExecuteTerm();
+    if (getExecuteTerm() == getDisplayTerm())
+        video = 3;
+
+    switch (video) {
+        
+        case 0:
+            video_mem = (char *)terminal_vidmem[0];
+            break;
+        case 1:
+            video_mem = (char *)terminal_vidmem[1];
+            break;
+        case 2:
+            video_mem = (char *)terminal_vidmem[2];
+            break;
+        case 3:
+            video_mem = (char *)VIDEO;
+            break;
+        default: 
+            video_mem = (char *)VIDEO;
+    }
+
+    memcpy(vidmem, vidmem + scroll_one_down, NUM_COLS * scroll_limit * 2); // move every line on the screen by one line above 
+    // screen_y--;
+    // char clear_line[80];
+    int i;
+    char clear = ' ';  // empty string 
+    // for (i = 0; i < 80; i++)
+    //     clear_line[i] = clear;
+    terminal->_screen_x = 0;
+    terminal->_screen_y = scroll_limit; // reach last line before scroll
+    
+    // puts(clear_line);
+    
+    // memset(video_mem + (NUM_COLS * screen_y * 2), clear, 80 * 2);
+
+    for (i = 0; i < NUM_COLS; i++) {
+        *(uint8_t *)(vidmem + ((NUM_COLS * scroll_limit + i) << 1)) = clear; // clear the last line of the terminal 
+    }
+    // update_cursor();
+    
+}
+
 
 /* int8_t* itoa(uint32_t value, int8_t* buf, int32_t radix);
  * Inputs: uint32_t value = number to convert
@@ -380,7 +580,7 @@ void* memcpy(void* dest, const void* src, uint32_t n) {
  * Description: Optimized memmove (used for overlapping memory areas)
  * Inputs:      void* dest = destination of move
  *         const void* src = source of move
- *              uint32_t n = number of byets to move
+ *              uint32_t n = number of bytes to move
  * Return Value: pointer to dest
  * Function: move n bytes of src to dest */
 void* memmove(void* dest, const void* src, uint32_t n) {
@@ -473,4 +673,15 @@ void test_interrupts(void) {
     for (i = 0; i < NUM_ROWS * NUM_COLS; i++) {
         video_mem[i << 1]++;
     }
+}
+
+/* void test_rtc_video
+ * Inputs: none
+ * Return Value: void
+ * Function: To be used to test rtc */
+void test_rtc_video() {
+    int32_t i;
+    for (i = 0; i < NUM_COLS ; i++) 
+        video_mem[i] = '1';
+    
 }
